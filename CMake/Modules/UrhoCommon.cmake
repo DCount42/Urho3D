@@ -150,14 +150,14 @@ if (CMAKE_PROJECT_NAME STREQUAL Urho3D)
     # For completeness sake - this option is intentionally not documented as we do not officially support PowerPC (yet)
     cmake_dependent_option (URHO3D_ALTIVEC "Enable AltiVec instruction set (PowerPC only)" ${HAVE_ALTIVEC} POWERPC FALSE)
     cmake_dependent_option (URHO3D_LUAJIT "Enable Lua scripting support using LuaJIT (check LuaJIT's CMakeLists.txt for more options)" FALSE "NOT WEB" FALSE)
-    cmake_dependent_option (URHO3D_LUAJIT_AMALG "Enable LuaJIT amalgamated build (LuaJIT only)" FALSE "URHO3D_LUAJIT" FALSE)
-    cmake_dependent_option (URHO3D_SAFE_LUA "Enable Lua C++ wrapper safety checks (Lua/LuaJIT only)" FALSE "URHO3D_LUA OR URHO3D_LUAJIT" FALSE)
+    cmake_dependent_option (URHO3D_LUAJIT_AMALG "Enable LuaJIT amalgamated build (LuaJIT only)" FALSE URHO3D_LUAJIT FALSE)
+    cmake_dependent_option (URHO3D_SAFE_LUA "Enable Lua C++ wrapper safety checks (Lua/LuaJIT only)" FALSE URHO3D_LUA FALSE)
     if (CMAKE_BUILD_TYPE STREQUAL Release OR CMAKE_CONFIGURATION_TYPES)
         set (URHO3D_DEFAULT_LUA_RAW FALSE)
     else ()
         set (URHO3D_DEFAULT_LUA_RAW TRUE)
     endif ()
-    cmake_dependent_option (URHO3D_LUA_RAW_SCRIPT_LOADER "Prefer loading raw script files from the file system before falling back on Urho3D resource cache. Useful for debugging (e.g. breakpoints), but less performant (Lua/LuaJIT only)" ${URHO3D_DEFAULT_LUA_RAW} "URHO3D_LUA OR URHO3D_LUAJIT" FALSE)
+    cmake_dependent_option (URHO3D_LUA_RAW_SCRIPT_LOADER "Prefer loading raw script files from the file system before falling back on Urho3D resource cache. Useful for debugging (e.g. breakpoints), but less performant (Lua/LuaJIT only)" ${URHO3D_DEFAULT_LUA_RAW} URHO3D_LUA FALSE)
     option (URHO3D_SAMPLES "Build sample applications" TRUE)
     option (URHO3D_UPDATE_SOURCE_TREE "Enable commands to copy back some of the generated build artifacts from build tree to source tree to facilitate devs to push them as part of a commit (for library devs with push right only)")
     option (URHO3D_BINDINGS "Enable API binding generation support for script subystems")
@@ -170,6 +170,7 @@ if (CMAKE_PROJECT_NAME STREQUAL Urho3D)
     option (URHO3D_PCH "Enable PCH support" TRUE)
     cmake_dependent_option (URHO3D_DATABASE_ODBC "Enable Database support with ODBC, requires vendor-specific ODBC driver" FALSE "NOT IOS AND NOT ANDROID AND NOT WEB;NOT MSVC OR NOT MSVC_VERSION VERSION_LESS 1900" FALSE)
     option (URHO3D_DATABASE_SQLITE "Enable Database support with SQLite embedded")
+    # Enable file watcher support for automatic resource reloads by default.
     option (URHO3D_FILEWATCHER "Enable filewatcher support" TRUE)
     option (URHO3D_TESTING "Enable testing support")
     # By default this option is off (i.e. we use the MSVC dynamic runtime), this can be switched on if using Urho3D as a STATIC library
@@ -187,7 +188,7 @@ if (CMAKE_PROJECT_NAME STREQUAL Urho3D)
         set_property (GLOBAL PROPERTY FIND_LIBRARY_USE_LIB64_PATHS ${URHO3D_64BIT})
     endif ()
 else ()
-    set (URHO3D_LIB_TYPE "" CACHE STRING "Specify Urho3D library type, possible values are STATIC and SHARED")
+    set (URHO3D_LIB_TYPE "" CACHE STRING "Specify Urho3D library type, possible values are STATIC (default) and SHARED")
     set (URHO3D_HOME "" CACHE PATH "Path to Urho3D build tree or SDK installation location (downstream project only)")
     if (URHO3D_PCH OR URHO3D_UPDATE_SOURCE_TREE OR URHO3D_TOOLS)
         # Just reference it to suppress "unused variable" CMake warning on downstream projects using this CMake module
@@ -201,14 +202,15 @@ else ()
     endif ()
 endif ()
 option (URHO3D_PACKAGING "Enable resources packaging support, on Web platform default to 1, on other platforms default to 0" ${WEB})
+# Enable profiling by default. If disabled, autoprofileblocks become no-ops and the Profiler subsystem is not instantiated.
 option (URHO3D_PROFILING "Enable profiling support" TRUE)
+# Enable logging by default. If disabled, LOGXXXX macros become no-ops and the Log subsystem is not instantiated.
 option (URHO3D_LOGGING "Enable logging support" TRUE)
-# Emscripten thread support is yet experimental; default false
+# Enable threading by default, except for Emscripten because its thread support is yet experimental
 if (NOT WEB)
-    option (URHO3D_THREADING "Enable thread support, on Web platform default to 0, on other platforms default to 1" TRUE)
-else ()
-    option (URHO3D_THREADING "Enable thread support, on Web platform default to 0, on other platforms default to 1" FALSE)
+    set (THREADING_DEFAULT TRUE)
 endif ()
+option (URHO3D_THREADING "Enable thread support, on Web platform default to 0, on other platforms default to 1" ${THREADING_DEFAULT})
 if (URHO3D_TESTING)
     if (WEB)
         set (DEFAULT_TIMEOUT 10)
@@ -305,6 +307,22 @@ endif ()
 if (RPI)
     set_property (CACHE RPI_ABI PROPERTY STRINGS ${RPI_SUPPORTED_ABIS})
 endif ()
+# Handle mutually exclusive options and implied options
+if (URHO3D_D3D11)
+    set (URHO3D_OPENGL 0)
+    unset (URHO3D_OPENGL CACHE)
+endif ()
+if (URHO3D_DATABASE_ODBC)
+    set (URHO3D_DATABASE_SQLITE 0)
+    unset (URHO3D_DATABASE_SQLITE CACHE)
+endif ()
+if (URHO3D_DATABASE_SQLITE OR URHO3D_DATABASE_ODBC)
+    set (URHO3D_DATABASE 1)
+endif ()
+if (URHO3D_LUAJIT)
+    set (JIT JIT)
+    set (URHO3D_LUA 1)
+endif ()
 
 # Union all the sysroot variables into one so it can be referred to generically later
 set (SYSROOT ${CMAKE_SYSROOT} ${MINGW_SYSROOT} ${IOS_SYSROOT} ${EMSCRIPTEN_SYSROOT} CACHE INTERNAL "Path to system root of the cross-compiling target")  # SYSROOT is empty for native build
@@ -323,7 +341,17 @@ if (URHO3D_CLANG_TOOLS)
     set (URHO3D_PCH 0)
     set (URHO3D_LIB_TYPE SHARED)
     # Set build options that would maximise the AST of Urho3D library
-    foreach (OPT URHO3D_ANGELSCRIPT URHO3D_LUA URHO3D_FILEWATCHER URHO3D_PROFILING URHO3D_LOGGING URHO3D_NAVIGATION URHO3D_NETWORK URHO3D_PHYSICS URHO3D_URHO2D URHO3D_DATABASE_SQLITE)
+    foreach (OPT
+            URHO3D_ANGELSCRIPT
+            URHO3D_DATABASE_SQLITE
+            URHO3D_FILEWATCHER
+            URHO3D_LOGGING
+            URHO3D_LUA
+            URHO3D_NAVIGATION
+            URHO3D_NETWORK
+            URHO3D_PHYSICS
+            URHO3D_PROFILING
+            URHO3D_URHO2D)
         set (${OPT} 1)
     endforeach()
     foreach (OPT URHO3D_TESTING URHO3D_LUAJIT URHO3D_DATABASE_ODBC)
@@ -336,43 +364,6 @@ if (URHO3D_TESTING)
     enable_testing ()
 endif ()
 
-# Define preprocessor macros (for building the Urho3D library) based on the configured build options
-foreach (OPT URHO3D_MINIDUMPS URHO3D_WIN32_CONSOLE)
-    if (${OPT})
-        add_definitions (-D${OPT})
-    endif ()
-endforeach ()
-
-# Enable file watcher support for automatic resource reloads by default.
-if (URHO3D_FILEWATCHER)
-    add_definitions (-DURHO3D_FILEWATCHER)
-endif ()
-
-# Enable profiling by default. If disabled, autoprofileblocks become no-ops and the Profiler subsystem is not instantiated.
-if (URHO3D_PROFILING)
-    add_definitions (-DURHO3D_PROFILING)
-endif ()
-
-# Enable logging by default. If disabled, LOGXXXX macros become no-ops and the Log subsystem is not instantiated.
-if (URHO3D_LOGGING)
-    add_definitions (-DURHO3D_LOGGING)
-endif ()
-
-# Enable threading by default, except for Emscripten.
-if (URHO3D_THREADING)
-    add_definitions (-DURHO3D_THREADING)
-endif ()
-
-# Add definitions for Emscripten
-if (EMSCRIPTEN)
-    add_definitions (-DNO_POPEN)
-endif ()
-
-# URHO3D_D3D11 overrides URHO3D_OPENGL option
-if (URHO3D_D3D11)
-    set (URHO3D_OPENGL 0)
-endif ()
-
 # Default library type is STATIC
 if (URHO3D_LIB_TYPE)
     string (TOUPPER ${URHO3D_LIB_TYPE} URHO3D_LIB_TYPE)
@@ -383,66 +374,41 @@ if (NOT URHO3D_LIB_TYPE STREQUAL SHARED)
         # This define will be baked into the export header for MSVC compiler
         set (URHO3D_STATIC_DEFINE 1)
     else ()
+        # Only define it on the fly when necessary (both SHARED and STATIC libs can coexist) for other compiler toolchains
         add_definitions (-DURHO3D_STATIC_DEFINE)
     endif ()
 endif ()
 
-# Add definition for AngelScript
-if (URHO3D_ANGELSCRIPT)
-    add_definitions (-DURHO3D_ANGELSCRIPT)
-    # Force C++11 if using Emscripten + AngelScript (required by the generic bindings generation)
-    if (EMSCRIPTEN OR (ARM AND NATIVE_64BIT))
-        set (URHO3D_C++11 1)
-    endif ()
+# Force C++11 standard (required by the generic bindings generation) if using AngelScript on Web and 64-bit ARM platforms
+if (URHO3D_ANGELSCRIPT AND (EMSCRIPTEN OR (ARM AND URHO3D_64BIT)))
+    set (URHO3D_C++11 1)
 endif ()
 
-# Add definition for Lua and LuaJIT
-if (URHO3D_LUAJIT)
-    set (JIT JIT)
-    # Implied URHO3D_LUA
-    set (URHO3D_LUA 1)
-endif ()
-if (URHO3D_LUA)
-    add_definitions (-DURHO3D_LUA)
-    # Optionally enable Lua / C++ wrapper safety checks
-    if (NOT URHO3D_SAFE_LUA)
-        add_definitions (-DTOLUA_RELEASE)
-    endif ()
-endif ()
-if (URHO3D_LUA_RAW_SCRIPT_LOADER)
-    add_definitions (-DURHO3D_LUA_RAW_SCRIPT_LOADER)
-endif ()
-
-# Add definition for Navigation
-if (URHO3D_NAVIGATION)
-    add_definitions (-DURHO3D_NAVIGATION)
-endif ()
-
-# Add definition for Network
-if (URHO3D_NETWORK)
-    add_definitions (-DURHO3D_NETWORK)
-endif ()
-
-# Add definition for Physics
-if (URHO3D_PHYSICS)
-    add_definitions (-DURHO3D_PHYSICS)
-endif ()
-
-# Add definition for Urho2D
-if (URHO3D_URHO2D)
-    add_definitions (-DURHO3D_URHO2D)
-endif ()
-
-# Add definition for Database
+# Force C++11 standard (required by nanodbc library) if using ODBC
 if (URHO3D_DATABASE_ODBC)
-    set (URHO3D_DATABASE_SQLITE 0)
     find_package (ODBC REQUIRED)
     set (URHO3D_C++11 1)
 endif ()
-if (URHO3D_DATABASE_SQLITE OR URHO3D_DATABASE_ODBC)
-    set (URHO3D_DATABASE 1)
-    add_definitions (-DURHO3D_DATABASE)
-endif ()
+
+# Define preprocessor macros (for building the Urho3D library) based on the configured build options
+foreach (OPT
+        URHO3D_ANGELSCRIPT
+        URHO3D_DATABASE
+        URHO3D_FILEWATCHER
+        URHO3D_LOGGING
+        URHO3D_LUA
+        URHO3D_MINIDUMPS
+        URHO3D_NAVIGATION
+        URHO3D_NETWORK
+        URHO3D_PHYSICS
+        URHO3D_PROFILING
+        URHO3D_THREADING
+        URHO3D_URHO2D
+        URHO3D_WIN32_CONSOLE)
+    if (${OPT})
+        add_definitions (-D${OPT})
+    endif ()
+endforeach ()
 
 # TODO: The logic below is earmarked to be moved into SDL's CMakeLists.txt when refactoring the library dependency handling, until then ensure the DirectX package is not being searched again in external projects such as when building LuaJIT library
 if (WIN32 AND NOT CMAKE_PROJECT_NAME MATCHES ^Urho3D-ExternalProject-)
